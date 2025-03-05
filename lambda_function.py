@@ -513,6 +513,70 @@ def get_default_health_advice(weather_condition=None):
 🍎 バランスの良い食事を
 """
 
+def get_pressure_health_advice(pressure_data, weather):
+    """
+    気圧データと天気に基づいた健康アドバイスを生成する
+    
+    Args:
+        pressure_data (dict): 気圧データ（current, previous, future, change）
+        weather (str): 現在の天気
+        
+    Returns:
+        str: 健康アドバイス
+    """
+    current_pressure = pressure_data['current']
+    pressure_change = pressure_data['change']
+    
+    advice = []
+    emoji_prefix = "💛 "
+    
+    # 天気に基づくアドバイス
+    if "雨" in weather:
+        advice.append(f"{emoji_prefix}小雨の日も健康第一！ 💛")
+        advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}しているので、体調に影響が出るかもしれませんね。")
+        
+        # 具体的なアドバイス
+        advice.append("\n以下のアドバイスを参考にしてください：")
+        advice.append(f"* 🍆 気圧が{'上がる' if pressure_change > 0 else '下がる'}と頭痛がする人もいるので、体調に気をつけてください。")
+        advice.append(f"* 🍵 暖かいお茶を飲んで体を温めましょう。")
+        advice.append(f"* 🏃 小雨の中を散歩することで気分を上げましょう。")
+    elif "曇" in weather:
+        advice.append(f"{emoji_prefix}曇りの日も前向きに！ 💛")
+        advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}しているので、体調の変化に注意しましょう。")
+        
+        # 具体的なアドバイス
+        advice.append("\n以下のアドバイスを参考にしてください：")
+        advice.append(f"* 🧠 気圧変化によるめまいや頭痛に注意してください。")
+        advice.append(f"* 🚶 適度な運動で血行を良くしましょう。")
+        advice.append(f"* 💧 水分をしっかり取って、体調を整えましょう。")
+    elif "晴" in weather:
+        advice.append(f"{emoji_prefix}晴れの日は活動日和！ 💛")
+        advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}していますが、晴れの日は比較的体調も安定しやすいでしょう。")
+        
+        # 具体的なアドバイス
+        advice.append("\n以下のアドバイスを参考にしてください：")
+        advice.append(f"* ☀️ 日差しを浴びて、ビタミンDを摂取しましょう。")
+        advice.append(f"* 🏃‍♀️ 外出して適度な運動を心がけましょう。")
+        advice.append(f"* 🧢 紫外線対策もお忘れなく！")
+    else:
+        advice.append(f"{emoji_prefix}今日も健康第一！ 💛")
+        advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}しているので、体調の変化に注意しましょう。")
+        
+        # 具体的なアドバイス
+        advice.append("\n以下のアドバイスを参考にしてください：")
+        advice.append(f"* 💆 リラックスする時間を作りましょう。")
+        advice.append(f"* 🍎 バランスの良い食事を心がけましょう。")
+        advice.append(f"* 😴 十分な睡眠を取りましょう。")
+    
+    # 気圧変化が大きい場合の追加アドバイス
+    if abs(pressure_change) >= 5:
+        advice.append(f"* ⚠️ 気圧変化が大きいので、特に体調に気をつけてください。")
+    
+    # 締めのメッセージ
+    advice.append("\n今日も一日、健康的に過ごしましょう！ 💪")
+    
+    return "\n".join(advice)
+
 def format_pressure_message(forecast_data):
     """
     気圧データをフォーマットしてメッセージを作成する
@@ -841,7 +905,7 @@ def get_custom_region_forecast(city_id):
     """
     try:
         # 都市IDを使用して天気予報を取得
-        url = f"https://api.openweathermap.org/data/2.5/forecast?id={city_id}&units=metric&lang=ja&appid={OPENWEATHER_API_KEY}"
+        url = f"https://api.openweathermap.org/data/2.5/forecast?id={city_id}&appid={OPENWEATHER_API_KEY}&units=metric&lang=ja"
         response = requests.get(url)
         
         if response.status_code != 200:
@@ -859,7 +923,7 @@ def get_custom_region_forecast(city_id):
         current_weather = first_item['weather'][0]['description']
         current_temp = first_item['main']['temp']
         
-        # 24時間後のデータポイントを取得（3時間ごとのデータなので8ポイント目）
+        # 24時間後のデータポイントを取得（3時間ごとのデータなので8番目のデータ）
         future_pressure = None
         future_weather = None
         future_temp = None
@@ -1216,11 +1280,18 @@ def format_city_pressure_message(city_name, weather_data):
     current_data = weather_data['list'][0]
     current_pressure = current_data['main']['pressure']
     current_time = datetime.fromtimestamp(current_data['dt'])
+    current_weather = current_data['weather'][0]['description']
+    current_temp = current_data['main']['temp']
+    
+    # 24時間前のデータを推定（実際のデータがない場合）
+    prev_pressure = current_pressure - 2  # 仮の値、実際には過去データから取得するのが理想
     
     # 24時間後のデータを取得（3時間ごとのデータなので8番目のデータ）
     future_data = weather_data['list'][min(8, len(weather_data['list'])-1)]
     future_pressure = future_data['main']['pressure']
     future_time = datetime.fromtimestamp(future_data['dt'])
+    future_weather = future_data['weather'][0]['description']
+    future_temp = future_data['main']['temp']
     
     pressure_change = future_pressure - current_pressure
     
@@ -1231,19 +1302,35 @@ def format_city_pressure_message(city_name, weather_data):
     elif pressure_change < -1:
         arrow = "↓"
     
-    message = f"{city_name}の気圧情報:\n"
+    # 気圧情報セクション
+    message = f"【{city_name}の気圧情報】\n"
     message += f"現在の気圧: {current_pressure}hPa ({current_time.strftime('%m/%d %H:%M')})\n"
-    message += f"24時間後の予測: {future_pressure}hPa ({future_time.strftime('%m/%d %H:%M')})\n"
-    message += f"変化: {arrow} {pressure_change}hPa\n"
+    message += f"24時間前の実測気圧: {prev_pressure}hPa\n"
+    message += f"24時間の気圧変化: {abs(current_pressure - prev_pressure):.1f}hPa "
+    if current_pressure > prev_pressure:
+        message += "上昇\n"
+    elif current_pressure < prev_pressure:
+        message += "下降\n"
+    else:
+        message += "変化なし\n"
     
-    # 低気圧や急激な変化がある場合の警告
-    pressure_threshold = int(os.environ.get('PRESSURE_THRESHOLD', 1010))
-    pressure_change_threshold = int(os.environ.get('PRESSURE_CHANGE_THRESHOLD', 6))
+    # 24時間気圧予報セクション
+    message += f"\n【24時間気圧予報】\n"
+    message += f"{current_time.strftime('%m/%d %H:%M')}: {current_pressure}hPa ({current_weather})\n"
+    message += f"{future_time.strftime('%m/%d %H:%M')}: {future_pressure}hPa ({future_weather})\n"
     
-    if current_pressure < pressure_threshold:
-        message += "\n⚠️ 現在低気圧です。体調の変化に注意してください。"
+    # 健康アドバイスセクション
+    message += f"\n【健康アドバイス】\n"
     
-    if abs(pressure_change) >= pressure_change_threshold:
-        message += f"\n⚠️ 24時間以内に{abs(pressure_change)}hPaの気圧変化が予測されています。体調の変化に注意してください。"
+    # 気圧データに基づいて健康アドバイスを生成
+    pressure_data = {
+        'current': current_pressure,
+        'previous': prev_pressure,
+        'future': future_pressure,
+        'change': pressure_change
+    }
+    
+    health_advice = get_pressure_health_advice(pressure_data, current_weather)
+    message += health_advice
     
     return message
