@@ -18,7 +18,7 @@
    - `OPENWEATHER_API_KEY`: OpenWeatherMapのAPIキー
    - `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging APIのチャネルアクセストークン
    - `LINE_USER_ID`: 通知を送信するLINEユーザーID
-   - `CITY_ID`: 天気情報を取得する都市ID（デフォルトは東京都港区: 1850144）
+   - `CITY_ID`: 天気情報を取得する都市ID（デフォルトは島根県松江市: 1857550）
    - `PRESSURE_THRESHOLD`: 低気圧と判定する閾値（hPa）（デフォルト: 1010hPa）
    - `PRESSURE_CHANGE_THRESHOLD`: 警告する気圧変化の閾値（hPa）（デフォルト: 6hPa）
    - `GROQ_API_KEY`: Groq APIキー（健康アドバイス機能用）
@@ -66,4 +66,4 @@ EventBridgeを使用して定期的に実行するようにスケジュールす
 - OpenWeatherMap APIの無料プランでは、APIコール数に制限があります
 - 気圧の閾値は個人の体調に合わせて調整してください
 - このツールは医療アドバイスを提供するものではありません
-- Groq APIは有料サービスです。使用量に応じて料金が発生します
+- Groq APIは無料で利用できます
