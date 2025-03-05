@@ -532,14 +532,14 @@ def get_pressure_health_advice(pressure_data, weather):
     
     # 天気に基づくアドバイス
     if "雨" in weather:
-        advice.append(f"{emoji_prefix}小雨の日も健康第一！ 💛")
+        advice.append(f"{emoji_prefix}雨の日も健康第一！ 💛")
         advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}しているので、体調に影響が出るかもしれませんね。")
         
         # 具体的なアドバイス
         advice.append("\n以下のアドバイスを参考にしてください：")
         advice.append(f"* 🍆 気圧が{'上がる' if pressure_change > 0 else '下がる'}と頭痛がする人もいるので、体調に気をつけてください。")
         advice.append(f"* 🍵 暖かいお茶を飲んで体を温めましょう。")
-        advice.append(f"* 🏃 小雨の中を散歩することで気分を上げましょう。")
+        advice.append(f"* 🏃 雨の中を散歩することで気分を上げましょう。")
     elif "曇" in weather:
         advice.append(f"{emoji_prefix}曇りの日も前向きに！ 💛")
         advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}しているので、体調の変化に注意しましょう。")
@@ -549,7 +549,7 @@ def get_pressure_health_advice(pressure_data, weather):
         advice.append(f"* 🧠 気圧変化によるめまいや頭痛に注意してください。")
         advice.append(f"* 🚶 適度な運動で血行を良くしましょう。")
         advice.append(f"* 💧 水分をしっかり取って、体調を整えましょう。")
-    elif "晴" in weather:
+    elif "晴" in weather or "快晴" in weather:
         advice.append(f"{emoji_prefix}晴れの日は活動日和！ 💛")
         advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}していますが、晴れの日は比較的体調も安定しやすいでしょう。")
         
@@ -935,7 +935,7 @@ def get_custom_region_forecast(city_id):
         
         # メッセージを作成
         message = f"【{city_name}の気圧情報】\n"
-        message += f"現在の気圧: {current_pressure}hPa（{current_weather}、{current_temp:.1f}℃）\n"
+        message += f"現在の気圧: {current_pressure}hPa ({current_weather}、{current_temp:.1f}℃）\n"
         
         if future_pressure:
             # 気圧変化を計算
@@ -948,7 +948,7 @@ def get_custom_region_forecast(city_id):
             elif pressure_change < -1:
                 arrow = "↓"
             
-            message += f"24時間後の予測: {future_pressure}hPa（{future_weather}、{future_temp:.1f}℃）\n"
+            message += f"24時間後の予測: {future_pressure}hPa ({future_weather}、{future_temp:.1f}℃）\n"
             message += f"変化: {arrow} {pressure_change}hPa\n"
             
             # 急激な気圧変化の警告
@@ -1314,10 +1314,21 @@ def format_city_pressure_message(city_name, weather_data):
     else:
         message += "変化なし\n"
     
-    # 24時間気圧予報セクション
+    # 24時間気圧予報セクション - より詳細に
     message += f"\n【24時間気圧予報】\n"
-    message += f"{current_time.strftime('%m/%d %H:%M')}: {current_pressure}hPa ({current_weather})\n"
-    message += f"{future_time.strftime('%m/%d %H:%M')}: {future_pressure}hPa ({future_weather})\n"
+    
+    # 現在から24時間分の予報を3時間ごとに表示（最大8ポイント）
+    forecast_points = min(8, len(weather_data['list']))
+    for i in range(forecast_points):
+        forecast = weather_data['list'][i]
+        forecast_time = datetime.fromtimestamp(forecast['dt'])
+        forecast_pressure = forecast['main']['pressure']
+        forecast_weather = forecast['weather'][0]['description']
+        
+        # 英語の天気を日本語に変換
+        forecast_weather = translate_weather_to_japanese(forecast_weather)
+        
+        message += f"{forecast_time.strftime('%m/%d %H:%M')}: {forecast_pressure}hPa ({forecast_weather})\n"
     
     # 健康アドバイスセクション
     message += f"\n【健康アドバイス】\n"
@@ -1330,7 +1341,52 @@ def format_city_pressure_message(city_name, weather_data):
         'change': pressure_change
     }
     
-    health_advice = get_pressure_health_advice(pressure_data, current_weather)
+    # 英語の天気を日本語に変換
+    current_weather_ja = translate_weather_to_japanese(current_weather)
+    
+    health_advice = get_pressure_health_advice(pressure_data, current_weather_ja)
     message += health_advice
     
     return message
+
+# 英語の天気を日本語に変換する関数
+def translate_weather_to_japanese(weather_en):
+    """
+    英語の天気表現を日本語に変換する
+    
+    Args:
+        weather_en (str): 英語の天気表現
+        
+    Returns:
+        str: 日本語の天気表現
+    """
+    weather_dict = {
+        'clear sky': '快晴',
+        'few clouds': '晴れ（雲少し）',
+        'scattered clouds': '晴れ（雲あり）',
+        'broken clouds': '曇り',
+        'overcast clouds': '曇り',
+        'light rain': '小雨',
+        'moderate rain': '雨',
+        'heavy rain': '大雨',
+        'thunderstorm': '雷雨',
+        'snow': '雪',
+        'mist': '霧',
+        'fog': '霧',
+        'drizzle': '霧雨',
+        'shower rain': 'にわか雨',
+        'rain': '雨',
+        'thunderstorm with light rain': '雷雨（小雨）',
+        'thunderstorm with rain': '雷雨',
+        'thunderstorm with heavy rain': '雷雨（大雨）',
+        'light snow': '小雪',
+        'heavy snow': '大雪'
+    }
+    
+    # 辞書に登録されている場合は日本語を返す
+    for en, ja in weather_dict.items():
+        if en in weather_en.lower():
+            return ja
+    
+    # 登録されていない場合はそのまま返す
+    return weather_en
