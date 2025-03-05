@@ -375,8 +375,8 @@ def get_pressure_health_advice(pressure_data, weather_condition=None):
             import json
             
             # プロンプトの作成
-            current_pressure = pressure_data.get('current_pressure', 'N/A')
-            pressure_change = pressure_data.get('pressure_change', 'N/A')
+            current_pressure = pressure_data.get('current', 'N/A')
+            pressure_change = pressure_data.get('change', 'N/A')
             
             # 気圧変化の説明
             change_description = ""
@@ -439,7 +439,7 @@ def get_pressure_health_advice(pressure_data, weather_condition=None):
                 advice = response_data["choices"][0]["message"]["content"].strip()
                 
                 logger.info("Groq APIを使用して健康アドバイスを生成しました")
-                return f"\n【健康アドバイス】\n{advice}"
+                return f"\n{advice}"
             else:
                 logger.error(f"Groq APIの呼び出しに失敗しました: {response.status_code} {response.text}")
                 # Groqが失敗した場合、デフォルトのアドバイスを返す
