@@ -902,47 +902,20 @@ def lambda_handler(event, context):
     AWS Lambdaのハンドラー関数
     """
     try:
-        logger.info("気圧通知処理を開始します")
+        # EventBridgeからのトリガー（定期実行）
+        if event and event.get('source') == 'aws.events':
+            logger.info("EventBridgeからの定期実行を開始します")
+            return process_scheduled_event()
         
-        # 天気予報データを取得
-        forecast_data = get_weather_forecast()
-        hourly_data = get_hourly_weather()
+        # LINE Webhookからのリクエスト処理
+        elif event and 'body' in event:
+            return process_line_webhook(event)
         
-        if not forecast_data or not hourly_data:
-            logger.error("天気データの取得に失敗しました")
-            return {
-                'statusCode': 500,
-                'body': json.dumps('天気データの取得に失敗しました')
-            }
-        
-        # S3にデータを保存
-        if S3_ENABLED:
-            save_weather_data_to_s3(forecast_data, 'daily')
-            save_weather_data_to_s3(hourly_data, 'hourly')
-        
-        # 気圧メッセージをフォーマット
-        message = format_pressure_message(forecast_data)
-        hourly_message = format_hourly_pressure_message(hourly_data)
-        
-        # LINE通知を送信
-        send_line_notification(message)
-        send_line_notification(hourly_message)
-        
-        # 地域カスタマイズが有効な場合、追加の地域情報を取得して通知
-        if REGION_CUSTOMIZATION and CUSTOM_CITY_IDS:
-            for city_id in CUSTOM_CITY_IDS:
-                if city_id.strip():  # 空でない場合のみ処理
-                    custom_message = get_custom_region_forecast(city_id.strip())
-                    if custom_message:
-                        send_line_notification(custom_message)
-        
-        logger.info("気圧通知処理が完了しました")
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps('気圧通知処理が完了しました')
-        }
-        
+        # 手動実行またはテスト実行
+        else:
+            logger.info("気圧通知処理を開始します（手動実行）")
+            return process_scheduled_event()
+            
     except Exception as e:
         logger.error(f"エラーが発生しました: {str(e)}")
         return {
@@ -950,29 +923,10 @@ def lambda_handler(event, context):
             'body': json.dumps(f'エラーが発生しました: {str(e)}')
         }
 
-# スクリプトとして実行された場合
-if __name__ == "__main__":
-    # .envファイルから環境変数を読み込む
-    try:
-        print("環境変数を.envファイルから読み込みます...")
-        from dotenv import load_dotenv
-        load_dotenv()
-        print("環境変数の読み込みが完了しました")
-    except Exception as e:
-        print(f"環境変数の読み込み中にエラーが発生しました: {str(e)}")
-    
-    # Lambda関数を実行
-    lambda_handler(None, None)
-
 # LINE Webhookからのイベント処理
-def lambda_handler(event, context):
-    # 既存の定期実行処理（EventBridgeからのトリガー）
-    if event.get('source') == 'aws.events':
-        return process_scheduled_event()
-    
-    # LINE Webhookからのリクエスト処理
+def process_line_webhook(event):
     try:
-        print(f"Received event: {json.dumps(event)}")
+        logger.info(f"LINE Webhookからのリクエストを処理します: {json.dumps(event)}")
         
         # リクエスト本文の取得
         body = None
@@ -1029,7 +983,7 @@ def lambda_handler(event, context):
             'body': json.dumps({'message': 'Success'})
         }
     except Exception as e:
-        print(f"Error processing LINE webhook: {str(e)}")
+        logger.error(f"LINE Webhookの処理中にエラーが発生しました: {str(e)}")
         return {
             'statusCode': 200,  # LINEは200以外のステータスコードを受け付けない
             'headers': {
@@ -1037,6 +991,79 @@ def lambda_handler(event, context):
             },
             'body': json.dumps({'message': f"Error: {str(e)}"})
         }
+
+# 既存の定期実行処理
+def process_scheduled_event():
+    """
+    定期実行イベントの処理（EventBridgeからのトリガー）
+    """
+    try:
+        logger.info("定期実行の気圧通知処理を開始します")
+        
+        # 天気予報データを取得
+        forecast_data = get_weather_forecast()
+        hourly_data = get_hourly_weather()
+        
+        if not forecast_data or not hourly_data:
+            logger.error("天気データの取得に失敗しました")
+            return {
+                'statusCode': 500,
+                'body': json.dumps('天気データの取得に失敗しました')
+            }
+        
+        # S3にデータを保存
+        if S3_ENABLED:
+            save_weather_data_to_s3(forecast_data, 'daily')
+            save_weather_data_to_s3(hourly_data, 'hourly')
+        
+        # 気圧メッセージをフォーマット
+        message = format_pressure_message(forecast_data)
+        hourly_message = format_hourly_pressure_message(hourly_data)
+        
+        # LINE通知を送信
+        send_line_notification(message)
+        send_line_notification(hourly_message)
+        
+        # 気圧アラートの検出
+        alert_needed, alert_message, max_change, change_time = detect_pressure_alert(hourly_data)
+        if alert_needed:
+            send_line_notification(alert_message)
+        
+        # 地域カスタマイズが有効な場合、追加の地域情報を取得して通知
+        if REGION_CUSTOMIZATION and CUSTOM_CITY_IDS:
+            for city_id in CUSTOM_CITY_IDS:
+                if city_id.strip():  # 空でない場合のみ処理
+                    custom_message = get_custom_region_forecast(city_id.strip())
+                    if custom_message:
+                        send_line_notification(custom_message)
+        
+        logger.info("気圧通知処理が完了しました")
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps('気圧通知処理が完了しました')
+        }
+        
+    except Exception as e:
+        logger.error(f"定期実行処理中にエラーが発生しました: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps(f'エラーが発生しました: {str(e)}')
+        }
+
+# スクリプトとして実行された場合
+if __name__ == "__main__":
+    # .envファイルから環境変数を読み込む
+    try:
+        print("環境変数を.envファイルから読み込みます...")
+        from dotenv import load_dotenv
+        load_dotenv()
+        print("環境変数の読み込みが完了しました")
+    except Exception as e:
+        print(f"環境変数の読み込み中にエラーが発生しました: {str(e)}")
+    
+    # Lambda関数を実行
+    lambda_handler(None, None)
 
 # AIで応答メッセージを生成する関数
 def generate_ai_response(message_text):
@@ -1133,53 +1160,16 @@ def process_city_request(city_name, reply_token, prefix=""):
         )
 
 # 既存の定期実行処理
-def process_scheduled_event():
-    try:
-        # 既存の処理をここに移動
-        forecast_data = get_weather_forecast()
-        
-        # S3にデータを保存（設定されている場合）
-        if os.environ.get('S3_ENABLED', 'false').lower() == 'true':
-            save_forecast_to_s3(forecast_data)
-        
-        # 気圧メッセージを作成
-        message = format_pressure_message(forecast_data)
-        
-        # Groq APIによる健康アドバイスを追加（設定されている場合）
-        if os.environ.get('USE_GROQ', 'false').lower() == 'true':
-            advice = get_health_advice_from_groq(forecast_data)
-            if advice:
-                message += f"\n\n{advice}"
-        
-        # LINE通知を送信
-        send_line_notification(message)
-        
-        # 予測アラート機能
-        detect_pressure_alert(forecast_data)
-        
-        # 地域カスタマイズ機能
-        if os.environ.get('REGION_CUSTOMIZATION', 'false').lower() == 'true':
-            custom_city_ids = os.environ.get('CUSTOM_CITY_IDS', '').split(',')
-            for city_id in custom_city_ids:
-                if city_id.strip():
-                    custom_forecast = get_custom_region_forecast(city_id.strip())
-                    if custom_forecast:
-                        custom_message = format_custom_region_message(custom_forecast)
-                        send_line_notification(custom_message)
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps('Weather notification sent successfully!')
-        }
-    except Exception as e:
-        print(f"Error in process_scheduled_event: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps(f"Error: {str(e)}")
-        }
-
-# 市名から都市IDを検索する関数
 def get_city_id_by_name(city_name):
+    """
+    市名から都市IDを検索する
+    
+    Args:
+        city_name (str): 市名
+    
+    Returns:
+        str: 都市ID
+    """
     # 島根県内の市→都市ID変換マップ
     shimane_city_map = {
         "松江市": "1857550",  # 松江市
@@ -1201,6 +1191,15 @@ def get_city_id_by_name(city_name):
 
 # 都市IDから気圧情報を取得する関数
 def get_weather_data_by_city_id(city_id):
+    """
+    都市IDから気圧情報を取得する
+    
+    Args:
+        city_id (str): 都市ID
+    
+    Returns:
+        dict: 気圧情報
+    """
     api_key = os.environ['OPENWEATHER_API_KEY']
     url = f"https://api.openweathermap.org/data/2.5/forecast?id={city_id}&appid={api_key}&units=metric"
     
@@ -1212,6 +1211,16 @@ def get_weather_data_by_city_id(city_id):
 
 # 気圧情報を整形するメッセージ
 def format_city_pressure_message(city_name, weather_data):
+    """
+    気圧情報を整形する
+    
+    Args:
+        city_name (str): 市名
+        weather_data (dict): 気圧情報
+    
+    Returns:
+        str: 整形されたメッセージ
+    """
     city = weather_data['city']['name']
     current_data = weather_data['list'][0]
     current_pressure = current_data['main']['pressure']
@@ -1292,7 +1301,7 @@ def translate_weather_to_japanese(weather_en):
     
     Args:
         weather_en (str): 英語の天気表現
-        
+    
     Returns:
         str: 日本語の天気表現
     """
