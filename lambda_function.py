@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 気圧情報を取得してLINE通知を送信するLambda関数
 """
