@@ -822,80 +822,48 @@ def send_line_notification(message):
         return
 
     try:
-        # メッセージの送信
-        line_bot_api.push_message(LINE_USER_ID, TextSendMessage(text=message))
-        logger.info("LINE通知を送信しました")
+        # 環境変数で指定されたユーザーIDに送信
+        if LINE_USER_ID:
+            line_bot_api.push_message(LINE_USER_ID, TextSendMessage(text=message))
+            logger.info(f"LINE通知を送信しました: {LINE_USER_ID}")
+        
+        # S3に保存されているすべてのユーザーにも送信
+        if S3_ENABLED:
+            try:
+                # S3クライアントの作成
+                s3_client = boto3.client('s3')
+                
+                # user_preferencesディレクトリ内のオブジェクトを一覧取得
+                response = s3_client.list_objects_v2(
+                    Bucket=S3_BUCKET_NAME,
+                    Prefix='user_preferences/'
+                )
+                
+                # ユーザーIDのリストを作成
+                user_ids = []
+                if 'Contents' in response:
+                    for obj in response['Contents']:
+                        key = obj['Key']
+                        if key.endswith('.json'):
+                            # ファイル名からユーザーIDを抽出 (user_preferences/USER_ID.json)
+                            user_id = key.split('/')[-1].replace('.json', '')
+                            if user_id and user_id != LINE_USER_ID:  # 重複送信を避ける
+                                user_ids.append(user_id)
+                
+                # 各ユーザーにメッセージを送信
+                for user_id in user_ids:
+                    try:
+                        line_bot_api.push_message(user_id, TextSendMessage(text=message))
+                        logger.info(f"LINE通知を送信しました: {user_id}")
+                    except Exception as e:
+                        logger.warning(f"ユーザー {user_id} への通知送信に失敗しました: {str(e)}")
+                
+                logger.info(f"合計 {len(user_ids) + (1 if LINE_USER_ID else 0)} 人のユーザーに通知を送信しました")
+            except Exception as e:
+                logger.error(f"S3からのユーザーリスト取得中にエラーが発生しました: {str(e)}")
     except Exception as e:
         logger.error(f"LINE通知の送信に失敗しました: {str(e)}")
         raise
-
-def get_custom_region_forecast(city_id):
-    """
-    カスタム地域の気圧情報を取得してフォーマットする
-    
-    Args:
-        city_id (str): OpenWeatherMap APIの都市ID
-        
-    Returns:
-        str: フォーマットされたメッセージ、エラーの場合はNone
-    """
-    try:
-        # 都市IDを使用して天気予報を取得
-        url = f"https://api.openweathermap.org/data/2.5/forecast?id={city_id}&appid={OPENWEATHER_API_KEY}&units=metric&lang=ja"
-        response = requests.get(url)
-        
-        if response.status_code != 200:
-            logger.error(f"カスタム地域の天気データ取得エラー: {response.status_code}")
-            return None
-        
-        forecast_data = response.json()
-        
-        # 都市名を取得
-        city_name = forecast_data['city']['name']
-        
-        # 最初のデータポイントの気圧と天気を取得
-        first_item = forecast_data['list'][0]
-        current_pressure = first_item['main']['pressure']
-        current_weather = first_item['weather'][0]['description']
-        current_temp = first_item['main']['temp']
-        
-        # 24時間後のデータポイントを取得（3時間ごとのデータなので8番目のデータ）
-        future_pressure = None
-        future_weather = None
-        future_temp = None
-        if len(forecast_data['list']) >= 8:
-            future_item = forecast_data['list'][7]
-            future_pressure = future_item['main']['pressure']
-            future_weather = future_item['weather'][0]['description']
-            future_temp = future_item['main']['temp']
-        
-        # メッセージを作成
-        message = f"【{city_name}の気圧情報】\n"
-        message += f"現在の気圧: {current_pressure}hPa ({current_weather}、{current_temp:.1f}℃）\n"
-        
-        if future_pressure:
-            # 気圧変化を計算
-            pressure_change = future_pressure - current_pressure
-            
-            # 気圧変化の矢印
-            arrow = "→"
-            if pressure_change > 1:
-                arrow = "↑"
-            elif pressure_change < -1:
-                arrow = "↓"
-            
-            message += f"24時間後の予測: {future_pressure}hPa ({future_weather}、{future_temp:.1f}℃）\n"
-            message += f"変化: {arrow} {pressure_change}hPa\n"
-            
-            # 急激な気圧変化の警告
-            if abs(pressure_change) >= PRESSURE_CHANGE_THRESHOLD:
-                message += f"\n⚠️ 24時間以内に{abs(pressure_change):.1f}hPaの気圧変化が予測されています。体調の変化に注意してください。\n"
-        
-        return message
-        
-    except Exception as e:
-        logger.error(f"カスタム地域の天気データ処理エラー: {str(e)}")
-        return None
 
 def lambda_handler(event, context):
     """
@@ -1335,3 +1303,71 @@ def translate_weather_to_japanese(weather_en):
     
     # 登録されていない場合はそのまま返す
     return weather_en
+
+def get_custom_region_forecast(city_id):
+    """
+    カスタム地域の気圧情報を取得してフォーマットする
+    
+    Args:
+        city_id (str): OpenWeatherMap APIの都市ID
+        
+    Returns:
+        str: フォーマットされたメッセージ、エラーの場合はNone
+    """
+    try:
+        # 都市IDを使用して天気予報を取得
+        url = f"https://api.openweathermap.org/data/2.5/forecast?id={city_id}&appid={OPENWEATHER_API_KEY}&units=metric&lang=ja"
+        response = requests.get(url)
+        
+        if response.status_code != 200:
+            logger.error(f"カスタム地域の天気データ取得エラー: {response.status_code}")
+            return None
+        
+        forecast_data = response.json()
+        
+        # 都市名を取得
+        city_name = forecast_data['city']['name']
+        
+        # 最初のデータポイントの気圧と天気を取得
+        first_item = forecast_data['list'][0]
+        current_pressure = first_item['main']['pressure']
+        current_weather = first_item['weather'][0]['description']
+        current_temp = first_item['main']['temp']
+        
+        # 24時間後のデータポイントを取得（3時間ごとのデータなので8番目のデータ）
+        future_pressure = None
+        future_weather = None
+        future_temp = None
+        if len(forecast_data['list']) >= 8:
+            future_item = forecast_data['list'][7]
+            future_pressure = future_item['main']['pressure']
+            future_weather = future_item['weather'][0]['description']
+            future_temp = future_item['main']['temp']
+        
+        # メッセージを作成
+        message = f"【{city_name}の気圧情報】\n"
+        message += f"現在の気圧: {current_pressure}hPa ({current_weather}、{current_temp:.1f}℃）\n"
+        
+        if future_pressure:
+            # 気圧変化を計算
+            pressure_change = future_pressure - current_pressure
+            
+            # 気圧変化の矢印
+            arrow = "→"
+            if pressure_change > 1:
+                arrow = "↑"
+            elif pressure_change < -1:
+                arrow = "↓"
+            
+            message += f"24時間後の予測: {future_pressure}hPa ({future_weather}、{future_temp:.1f}℃）\n"
+            message += f"変化: {arrow} {pressure_change}hPa\n"
+            
+            # 急激な気圧変化の警告
+            if abs(pressure_change) >= PRESSURE_CHANGE_THRESHOLD:
+                message += f"\n⚠️ 24時間以内に{abs(pressure_change):.1f}hPaの気圧変化が予測されています。体調の変化に注意してください。\n"
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"カスタム地域の天気データ処理エラー: {str(e)}")
+        return None
