@@ -69,24 +69,24 @@
    2. JSONタブを選択し、以下のポリシーを入力します（バケット名を適切に置き換えてください）：
       ```json
 {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "s3:PutObject",
-                "s3:GetObject",
-                "s3:DeleteObject",
-                "s3:ListBucket"
-            ],
-            "Resource": [
-                "arn:aws:s3:::kiatsu-data",
-                "arn:aws:s3:::kiatsu-data/*"
-            ]
-        }
-    ]
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::kiatsu-data",
+        "arn:aws:s3:::kiatsu-data/*"
+      ]
+    }
+  ]
 }
-      ```
+```
    3. 「次へ」をクリックし、ポリシー名を「KiatsuS3WritePolicy」などとして作成します。
    4. 作成したポリシーをLambda実行ロールにアタッチします。
 
