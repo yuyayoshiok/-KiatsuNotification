@@ -1010,11 +1010,16 @@ def lambda_handler(event, context):
                     if city_preference:
                         process_city_request(city_preference, reply_token, f"あなたの設定: {city_preference}\n\n")
                     else:
-                        # その他のメッセージ処理
-                        line_bot_api.reply_message(
-                            reply_token,
-                            TextSendMessage(text="気圧情報を知りたい地域名を「松江市」「出雲市」のように入力してください。")
-                        )
+                        # デフォルトで松江市を使用
+                        default_city = "松江市"
+                        save_user_city_preference(user_id, default_city)
+                        
+                        # AIで応答メッセージを生成
+                        ai_response = generate_ai_response(message_text)
+                        response_message = f"{ai_response}\n\n【デフォルト設定】\n{default_city}の気圧情報を表示します。\n他の地域の情報が必要な場合は「出雲市」のように入力してください。"
+                        
+                        # 松江市の情報を取得して応答
+                        process_city_request(default_city, reply_token, response_message + "\n\n")
         
         return {
             'statusCode': 200,
@@ -1032,6 +1037,31 @@ def lambda_handler(event, context):
             },
             'body': json.dumps({'message': f"Error: {str(e)}"})
         }
+
+# AIで応答メッセージを生成する関数
+def generate_ai_response(message_text):
+    """
+    ユーザーのメッセージに対してAIで応答メッセージを生成する
+    
+    Args:
+        message_text (str): ユーザーのメッセージ
+        
+    Returns:
+        str: 生成された応答メッセージ
+    """
+    # 挨拶に対する応答
+    greetings = ["こんにちは", "おはよう", "こんばんは", "やあ", "ハロー", "hello", "hi"]
+    
+    for greeting in greetings:
+        if greeting in message_text.lower():
+            return f"{greeting}！私は気圧情報をお知らせするボットです。島根県内の市名（例：松江市、出雲市）を入力すると、その地域の気圧情報をお知らせします。"
+    
+    # 質問に対する応答
+    if "?" in message_text or "？" in message_text or "何" in message_text or "教えて" in message_text:
+        return "私は島根県内の気圧情報をお知らせするボットです。「松江市」「出雲市」のように市名を入力すると、その地域の気圧情報をお知らせします。"
+    
+    # その他のメッセージに対する応答
+    return "申し訳ありませんが、私は気圧情報のみを提供するボットです。島根県内の市名（例：松江市、出雲市）を入力すると、その地域の気圧情報をお知らせします。"
 
 # ユーザーの市設定を保存する関数
 def save_user_city_preference(user_id, city_name):
