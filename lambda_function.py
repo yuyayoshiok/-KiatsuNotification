@@ -513,69 +513,6 @@ def get_default_health_advice(weather_condition=None):
 🍎 バランスの良い食事を
 """
 
-def get_pressure_health_advice(pressure_data, weather):
-    """
-    気圧データと天気に基づいた健康アドバイスを生成する
-    
-    Args:
-        pressure_data (dict): 気圧データ（current, previous, future, change）
-        weather (str): 現在の天気
-        
-    Returns:
-        str: 健康アドバイス
-    """
-    current_pressure = pressure_data['current']
-    pressure_change = pressure_data['change']
-    
-    advice = []
-    emoji_prefix = "💛 "
-    
-    # 天気に基づくアドバイス
-    if "雨" in weather:
-        advice.append(f"{emoji_prefix}雨の日も健康第一！ 💛")
-        advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}しているので、体調に影響が出るかもしれませんね。")
-        
-        # 具体的なアドバイス
-        advice.append("\n以下のアドバイスを参考にしてください：")
-        advice.append(f"* 🍆 気圧が{'上がる' if pressure_change > 0 else '下がる'}と頭痛がする人もいるので、体調に気をつけてください。")
-        advice.append(f"* 🍵 暖かいお茶を飲んで体を温めましょう。")
-        advice.append(f"* 🏃 雨の中を散歩することで気分を上げましょう。")
-    elif "曇" in weather:
-        advice.append(f"{emoji_prefix}曇りの日も前向きに！ 💛")
-        advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}しているので、体調の変化に注意しましょう。")
-        
-        # 具体的なアドバイス
-        advice.append("\n以下のアドバイスを参考にしてください：")
-        advice.append(f"* 🧠 気圧変化によるめまいや頭痛に注意してください。")
-        advice.append(f"* 🚶 適度な運動で血行を良くしましょう。")
-        advice.append(f"* 💧 水分をしっかり取って、体調を整えましょう。")
-    elif "晴" in weather or "快晴" in weather:
-        advice.append(f"{emoji_prefix}晴れの日は活動日和！ 💛")
-        advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}していますが、晴れの日は比較的体調も安定しやすいでしょう。")
-        
-        # 具体的なアドバイス
-        advice.append("\n以下のアドバイスを参考にしてください：")
-        advice.append(f"* ☀️ 日差しを浴びて、ビタミンDを摂取しましょう。")
-        advice.append(f"* 🏃‍♀️ 外出して適度な運動を心がけましょう。")
-        advice.append(f"* 🧢 紫外線対策もお忘れなく！")
-    else:
-        advice.append(f"{emoji_prefix}今日も健康第一！ 💛")
-        advice.append(f"今日は{weather}で、気圧は{current_pressure}hPaです。気圧が{abs(pressure_change):.1f}hPa{'上昇' if pressure_change > 0 else '下降'}しているので、体調の変化に注意しましょう。")
-        
-        # 具体的なアドバイス
-        advice.append("\n以下のアドバイスを参考にしてください：")
-        advice.append(f"* 💆 リラックスする時間を作りましょう。")
-        advice.append(f"* 🍎 バランスの良い食事を心がけましょう。")
-        advice.append(f"* 😴 十分な睡眠を取りましょう。")
-    
-    # 気圧変化が大きい場合の追加アドバイス
-    if abs(pressure_change) >= 5:
-        advice.append(f"* ⚠️ 気圧変化が大きいので、特に体調に気をつけてください。")
-    
-    # 締めのメッセージ
-    advice.append("\n今日も一日、健康的に過ごしましょう！ 💪")
-    
-    return "\n".join(advice)
 
 def format_pressure_message(forecast_data):
     """
