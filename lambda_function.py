@@ -27,7 +27,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"環境変数の読み込み中にエラーが発生しました: {str(e)}")
 
-# ロガーの設定
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
