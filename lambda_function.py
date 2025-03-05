@@ -42,14 +42,9 @@ GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 USE_GROQ = os.environ.get('USE_GROQ', 'true')
 S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'kiatsu-data')
 S3_ENABLED = os.environ.get('S3_ENABLED', 'false').lower() == 'true'
-
-# 環境変数の確認（デバッグ用）
-if __name__ == "__main__":
-    print(f"OPENWEATHER_API_KEY: {'設定済み' if OPENWEATHER_API_KEY else '未設定'}")
-    print(f"LINE_CHANNEL_ACCESS_TOKEN: {'設定済み' if LINE_CHANNEL_ACCESS_TOKEN else '未設定'}")
-    print(f"LINE_USER_ID: {'設定済み' if LINE_USER_ID else '未設定'}")
-    print(f"GROQ_API_KEY: {'設定済み' if GROQ_API_KEY else '未設定'}")
-    print(f"S3_ENABLED: {S3_ENABLED}")
+PRESSURE_ALERT_THRESHOLD = float(os.environ.get('PRESSURE_ALERT_THRESHOLD', '8'))  # 予測アラートの閾値
+REGION_CUSTOMIZATION = os.environ.get('REGION_CUSTOMIZATION', 'false').lower() == 'true'
+CUSTOM_CITY_IDS = os.environ.get('CUSTOM_CITY_IDS', '').split(',')  # カンマ区切りの都市ID
 
 # 日本のタイムゾーン
 JST = pytz.timezone('Asia/Tokyo')
@@ -331,6 +326,9 @@ def get_weather_forecast():
 def get_hourly_weather():
     """
     OpenWeatherMap APIから時間単位の天気予報データを取得する
+    
+    Args:
+        None
     
     Returns:
         dict: 時間単位の天気予報データ、エラーの場合はNone
@@ -615,6 +613,44 @@ def format_pressure_message(forecast_data):
     
     return "\n".join(message_parts)
 
+def detect_pressure_alert(hourly_data):
+    """
+    今後24時間以内に急激な気圧変化が予測されるかを検出する
+    
+    Args:
+        hourly_data (dict): 時間単位の天気予報データ
+        
+    Returns:
+        tuple: (アラートが必要かどうか, アラートメッセージ, 最大気圧変化, 変化時間)
+    """
+    if not hourly_data or 'list' not in hourly_data or len(hourly_data['list']) < 8:
+        return False, "", 0, ""
+    
+    # 今後24時間の時間単位データを取得
+    forecast_hours = hourly_data['list'][:8]  # 3時間ごとのデータなので8ポイントで24時間
+    
+    max_pressure_change = 0
+    max_change_time = None
+    previous_pressure = forecast_hours[0]['main']['pressure']
+    
+    # 各時間の気圧変化を計算
+    for i in range(1, len(forecast_hours)):
+        current_pressure = forecast_hours[i]['main']['pressure']
+        pressure_change = abs(current_pressure - previous_pressure)
+        
+        if pressure_change > max_pressure_change:
+            max_pressure_change = pressure_change
+            max_change_time = datetime.fromtimestamp(forecast_hours[i]['dt'], JST)
+        
+        previous_pressure = current_pressure
+    
+    # 3時間あたりの変化率がPRESSURE_ALERT_THRESHOLDを超える場合にアラート
+    if max_pressure_change >= PRESSURE_ALERT_THRESHOLD:
+        alert_message = f"⚠️ 気圧変化アラート ⚠️\n{max_change_time.strftime('%m/%d %H:%M')}頃に{max_pressure_change:.1f}hPaの急激な気圧変化が予測されています。体調の変化に注意してください。"
+        return True, alert_message, max_pressure_change, max_change_time.strftime('%m/%d %H:%M')
+    
+    return False, "", max_pressure_change, ""
+
 def format_hourly_pressure_message(hourly_data):
     """
     時間単位の気圧データをフォーマットしてメッセージを作成する
@@ -626,99 +662,58 @@ def format_hourly_pressure_message(hourly_data):
         str: フォーマットされたメッセージ
     """
     if not hourly_data or 'list' not in hourly_data:
-        return "時間単位の天気予報データの取得に失敗しました。"
+        return "時間単位の気圧データを取得できませんでした。"
     
-    # メッセージを作成
-    message_parts = []
-    message_parts.append("【松江市の気圧情報】")
+    # 24時間気圧予報のメッセージを作成
+    message = "【24時間気圧予報】\n"
     
-    # 気圧変化に関する会話的なコメントを追加
-    pressure_change_24h = None
-    if pressure_change_24h is not None:
-        message_parts.append("\n【気圧変化のポイント】")
-        if pressure_change_24h > 8:
-            message_parts.append(f"気圧が大きく上昇しています（{abs(pressure_change_24h):.1f}hPa）。頭痛や関節痛に注意が必要かもしれません。水分をしっかり取って、無理をしないようにしましょう。")
-        elif pressure_change_24h > 4:
-            message_parts.append(f"気圧が上昇しています（{abs(pressure_change_24h):.1f}hPa）。少し体が重く感じるかもしれませんが、軽い運動で気分転換するといいでしょう。")
-        elif pressure_change_24h > 0:
-            message_parts.append(f"気圧が少し上昇しています（{abs(pressure_change_24h):.1f}hPa）。特に大きな影響はないでしょうが、変化に敏感な方は体調の変化に注意してください。")
-        elif pressure_change_24h < -8:
-            message_parts.append(f"気圧が大きく下降しています（{abs(pressure_change_24h):.1f}hPa）。自律神経に影響が出やすいので、ゆっくり休息を取り、温かい飲み物を摂るといいでしょう。")
-        elif pressure_change_24h < -4:
-            message_parts.append(f"気圧が下降しています（{abs(pressure_change_24h):.1f}hPa）。疲れやすく感じるかもしれません。無理せず、リラックスする時間を作りましょう。")
+    # 最初の気圧を取得
+    first_item = hourly_data['list'][0]
+    first_pressure = first_item['main']['pressure']
+    first_dt = datetime.fromtimestamp(first_item['dt'], JST)
+    message += f"{first_dt.strftime('%m/%d %H:%M')} {first_pressure}hPa\n"
+    
+    # 最後の気圧を取得（24時間後 = 8ポイント目、3時間ごとのデータ）
+    if len(hourly_data['list']) >= 8:
+        last_item = hourly_data['list'][7]
+        last_pressure = last_item['main']['pressure']
+        last_dt = datetime.fromtimestamp(last_item['dt'], JST)
+        message += f"{last_dt.strftime('%m/%d %H:%M')} {last_pressure}hPa\n"
+    
+    # 24時間の気圧変化を計算
+    if len(hourly_data['list']) >= 8:
+        pressure_change_24h = hourly_data['list'][7]['main']['pressure'] - first_pressure
+        change_symbol = "→"
+        if pressure_change_24h > 0:
+            change_symbol = "↑"
         elif pressure_change_24h < 0:
-            message_parts.append(f"気圧が少し下降しています（{abs(pressure_change_24h):.1f}hPa）。特に大きな影響はないでしょうが、敏感な方は少し疲れを感じるかもしれません。")
-        else:
-            message_parts.append("気圧は安定しています。快適に過ごせる一日になりそうです。")
-    
-    # 現在の気圧（最初のデータポイント）
-    current_pressure = hourly_data['list'][0]['main']['pressure']
-    message_parts.append(f"現在の気圧: {current_pressure}hPa")
-    
-    # 現在の天気
-    current_weather = hourly_data['list'][0]['weather'][0]['description']
-    
-    # 前日のデータをS3から取得
-    previous_day_data = get_previous_day_weather_data('hourly')
-    pressure_change_24h = None
-    
-    if previous_day_data and 'list' in previous_day_data and len(previous_day_data['list']) > 0:
-        # 前日の同時刻の気圧を取得
-        previous_pressure = previous_day_data['list'][0]['main']['pressure']
-        pressure_change_24h = current_pressure - previous_pressure
-        message_parts.append(f"24時間前の実測気圧: {previous_pressure}hPa")
+            change_symbol = "↓"
         
-        # 気圧変化の方向
-        direction = "上昇" if pressure_change_24h > 0 else "下降"
-        message_parts.append(f"24時間の気圧変化: {abs(pressure_change_24h):.1f}hPa {direction}")
-    else:
-        # S3からデータが取得できない場合は推定値を使用
-        pressure_change_24h = estimate_pressure_change(hourly_data)
-        if pressure_change_24h is not None:
-            prev_pressure = current_pressure - pressure_change_24h
-            message_parts.append(f"24時間前の推定気圧: {prev_pressure:.1f}hPa")
-            
-            # 気圧変化の方向
-            direction = "上昇" if pressure_change_24h > 0 else "下降"
-            message_parts.append(f"24時間の気圧変化: {abs(pressure_change_24h):.1f}hPa {direction}")
+        message += f"\n24時間変化: {change_symbol} {abs(pressure_change_24h):.1f}hPa\n"
     
-    # 24時間の予報
-    message_parts.append("\n【24時間気圧予報】")
+    # 予測アラートの検出
+    has_alert, alert_message, max_change, change_time = detect_pressure_alert(hourly_data)
+    if has_alert:
+        message += f"\n{alert_message}\n"
     
-    # 表示するデータポイントを最初と最後のポイントに限定
-    if len(hourly_data['list']) >= 8:  # 24時間 = 8ポイント（3時間ごと）
-        display_indices = [0, 7]  # 最初と24時間後のポイント
-        
-        for i in display_indices:
-            item = hourly_data['list'][i]
-            dt = datetime.fromtimestamp(item['dt'], pytz.timezone('Asia/Tokyo'))
-            pressure = item['main']['pressure']
-            weather = item['weather'][0]['description']
-            
-            # 日付と時間をフォーマット
-            date_time = dt.strftime("%m/%d %H:%M")
-            
-            message_parts.append(f"{date_time}: {pressure}hPa ({weather})")
-    else:
-        # データポイントが少ない場合は最初のポイントだけ表示
-        item = hourly_data['list'][0]
-        dt = datetime.fromtimestamp(item['dt'], pytz.timezone('Asia/Tokyo'))
-        pressure = item['main']['pressure']
-        weather = item['weather'][0]['description']
-        
-        # 日付と時間をフォーマット
-        date_time = dt.strftime("%m/%d %H:%M")
-        
-        message_parts.append(f"{date_time}: {pressure}hPa ({weather})")
+    # 気圧変化に基づく健康アドバイスを取得
+    pressure_data = {
+        'current': first_pressure,
+        'change_24h': pressure_change_24h if 'pressure_change_24h' in locals() else 0
+    }
     
-    # 健康アドバイスを追加
-    current_pressure = hourly_data['list'][0]['main']['pressure']
-    weather = hourly_data['list'][0]['weather'][0]['description']
-    use_groq = USE_GROQ.lower() == 'true' if USE_GROQ else False
-    health_advice = get_pressure_health_advice({'current_pressure': current_pressure, 'pressure_change': pressure_change_24h}, weather)
-    message_parts.append(health_advice)
+    # 天気状況を取得
+    weather_condition = None
+    if 'weather' in first_item and len(first_item['weather']) > 0:
+        weather_condition = first_item['weather'][0]['description']
     
-    return "\n".join(message_parts)
+    # 健康アドバイスを取得
+    health_advice = get_pressure_health_advice(pressure_data, weather_condition)
+    
+    # メッセージに健康アドバイスを追加
+    message += f"\n【健康アドバイス】\n{health_advice}"
+    
+    return message
 
 def generate_dummy_forecast_data():
     """
@@ -834,61 +829,124 @@ def send_line_notification(message):
         logger.error(f"LINE通知の送信に失敗しました: {str(e)}")
         raise
 
+def get_custom_region_forecast(city_id):
+    """
+    カスタム地域の気圧情報を取得してフォーマットする
+    
+    Args:
+        city_id (str): OpenWeatherMap APIの都市ID
+        
+    Returns:
+        str: フォーマットされたメッセージ、エラーの場合はNone
+    """
+    try:
+        # 都市IDを使用して天気予報を取得
+        url = f"https://api.openweathermap.org/data/2.5/forecast?id={city_id}&units=metric&lang=ja&appid={OPENWEATHER_API_KEY}"
+        response = requests.get(url)
+        
+        if response.status_code != 200:
+            logger.error(f"カスタム地域の天気データ取得エラー: {response.status_code}")
+            return None
+        
+        forecast_data = response.json()
+        
+        # 都市名を取得
+        city_name = forecast_data['city']['name']
+        
+        # 最初のデータポイントの気圧と天気を取得
+        first_item = forecast_data['list'][0]
+        current_pressure = first_item['main']['pressure']
+        current_weather = first_item['weather'][0]['description']
+        current_temp = first_item['main']['temp']
+        
+        # 24時間後のデータポイントを取得（3時間ごとのデータなので8ポイント目）
+        future_pressure = None
+        future_weather = None
+        future_temp = None
+        if len(forecast_data['list']) >= 8:
+            future_item = forecast_data['list'][7]
+            future_pressure = future_item['main']['pressure']
+            future_weather = future_item['weather'][0]['description']
+            future_temp = future_item['main']['temp']
+        
+        # メッセージを作成
+        message = f"【{city_name}の気圧情報】\n"
+        message += f"現在の気圧: {current_pressure}hPa（{current_weather}、{current_temp:.1f}℃）\n"
+        
+        if future_pressure:
+            # 気圧変化を計算
+            pressure_change = future_pressure - current_pressure
+            change_symbol = "→"
+            if pressure_change > 0:
+                change_symbol = "↑"
+            elif pressure_change < 0:
+                change_symbol = "↓"
+            
+            message += f"24時間後の予測: {future_pressure}hPa（{future_weather}、{future_temp:.1f}℃）\n"
+            message += f"変化: {change_symbol} {abs(pressure_change):.1f}hPa\n"
+            
+            # 急激な気圧変化の警告
+            if abs(pressure_change) >= PRESSURE_CHANGE_THRESHOLD:
+                message += f"\n⚠️ 24時間以内に{abs(pressure_change):.1f}hPaの気圧変化が予測されています。体調の変化に注意してください。\n"
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"カスタム地域の天気データ処理エラー: {str(e)}")
+        return None
+
 def lambda_handler(event, context):
     """
     AWS Lambdaのハンドラー関数
     """
-    logger.info("気圧通知Lambdaが起動しました")
-    
-    # Groq APIを使用するかどうか
-    use_groq = USE_GROQ.lower() == 'true' if USE_GROQ else False
-    
-    # 5日間の天気予報を取得
-    forecast_data = get_weather_forecast()
-    
-    if not forecast_data:
-        message = "天気予報データの取得に失敗しました。"
-        logger.error(message)
-        send_line_notification(message)
-        return {
-            'statusCode': 500,
-            'body': message
-        }
-    
-    # 気圧メッセージをフォーマット
-    message = format_pressure_message(forecast_data)
-    
-    # 時間単位の天気予報を取得
-    hourly_data = get_hourly_weather()
-    
-    if hourly_data:
-        # 時間単位の気圧メッセージをフォーマット
+    try:
+        logger.info("気圧通知処理を開始します")
+        
+        # 天気予報データを取得
+        forecast_data = get_weather_forecast()
+        hourly_data = get_hourly_weather()
+        
+        if not forecast_data or not hourly_data:
+            logger.error("天気データの取得に失敗しました")
+            return {
+                'statusCode': 500,
+                'body': json.dumps('天気データの取得に失敗しました')
+            }
+        
+        # S3にデータを保存
+        if S3_ENABLED:
+            save_weather_data_to_s3(forecast_data, 'daily')
+            save_weather_data_to_s3(hourly_data, 'hourly')
+        
+        # 気圧メッセージをフォーマット
+        message = format_pressure_message(forecast_data)
         hourly_message = format_hourly_pressure_message(hourly_data)
         
         # LINE通知を送信
+        send_line_notification(message)
         send_line_notification(hourly_message)
         
-        # スクリプトとして実行された場合は標準出力に表示
-        if __name__ == "__main__":
-            print("\n" + "="*50)
-            print("24時間詳細気圧予報:")
-            print("="*50)
-            print(hourly_message)
-    else:
-        # LINE通知を送信
-        send_line_notification(message)
+        # 地域カスタマイズが有効な場合、追加の地域情報を取得して通知
+        if REGION_CUSTOMIZATION and CUSTOM_CITY_IDS:
+            for city_id in CUSTOM_CITY_IDS:
+                if city_id.strip():  # 空でない場合のみ処理
+                    custom_message = get_custom_region_forecast(city_id.strip())
+                    if custom_message:
+                        send_line_notification(custom_message)
         
-        # スクリプトとして実行された場合は標準出力に表示
-        if __name__ == "__main__":
-            print("\n" + "="*50)
-            print("5日間気圧予報:")
-            print("="*50)
-            print(message)
-    
-    return {
-        'statusCode': 200,
-        'body': 'Success'
-    }
+        logger.info("気圧通知処理が完了しました")
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps('気圧通知処理が完了しました')
+        }
+        
+    except Exception as e:
+        logger.error(f"エラーが発生しました: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps(f'エラーが発生しました: {str(e)}')
+        }
 
 # スクリプトとして実行された場合
 if __name__ == "__main__":
@@ -899,7 +957,261 @@ if __name__ == "__main__":
         load_dotenv()
         print("環境変数の読み込みが完了しました")
     except Exception as e:
-        print(f"環境変数の読み込みに失敗しました: {str(e)}")
+        print(f"環境変数の読み込み中にエラーが発生しました: {str(e)}")
     
     # Lambda関数を実行
     lambda_handler(None, None)
+
+# LINE Webhookからのイベント処理
+def lambda_handler(event, context):
+    # 既存の定期実行処理（EventBridgeからのトリガー）
+    if event.get('source') == 'aws.events':
+        return process_scheduled_event()
+    
+    # LINE Webhookからのリクエスト処理
+    try:
+        print(f"Received event: {json.dumps(event)}")
+        
+        # リクエスト本文の取得
+        body = None
+        if 'body' in event:
+            if isinstance(event['body'], str):
+                body = json.loads(event['body'])
+            else:
+                body = event['body']
+        
+        if not body or 'events' not in body:
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json'
+                },
+                'body': json.dumps({'message': 'No events in request body'})
+            }
+        
+        events = body.get('events', [])
+        
+        for line_event in events:
+            if line_event['type'] == 'message' and line_event['message']['type'] == 'text':
+                user_id = line_event['source']['userId']
+                reply_token = line_event['replyToken']
+                message_text = line_event['message']['text']
+                
+                # 市名の処理（「〇〇市」のパターンを検出）
+                if '市' in message_text:
+                    # ユーザーの設定を保存
+                    save_user_city_preference(user_id, message_text)
+                    process_city_request(message_text, reply_token)
+                else:
+                    # ユーザーの設定を取得して処理
+                    city_preference = get_user_city_preference(user_id)
+                    if city_preference:
+                        process_city_request(city_preference, reply_token, f"あなたの設定: {city_preference}\n\n")
+                    else:
+                        # その他のメッセージ処理
+                        line_bot_api.reply_message(
+                            reply_token,
+                            TextSendMessage(text="気圧情報を知りたい地域名を「松江市」「出雲市」のように入力してください。")
+                        )
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json'
+            },
+            'body': json.dumps({'message': 'Success'})
+        }
+    except Exception as e:
+        print(f"Error processing LINE webhook: {str(e)}")
+        return {
+            'statusCode': 200,  # LINEは200以外のステータスコードを受け付けない
+            'headers': {
+                'Content-Type': 'application/json'
+            },
+            'body': json.dumps({'message': f"Error: {str(e)}"})
+        }
+
+# ユーザーの市設定を保存する関数
+def save_user_city_preference(user_id, city_name):
+    try:
+        if os.environ.get('S3_ENABLED', 'false').lower() == 'true':
+            s3 = boto3.resource('s3')
+            bucket_name = os.environ.get('S3_BUCKET_NAME', 'kiatsu-data')
+            s3.Object(bucket_name, f'user_preferences/{user_id}.json').put(
+                Body=json.dumps({'city': city_name})
+            )
+            print(f"Saved user preference for {user_id}: {city_name}")
+        else:
+            print("S3 is not enabled, user preference not saved")
+    except Exception as e:
+        print(f"Error saving user preference: {str(e)}")
+
+# ユーザーの市設定を取得する関数
+def get_user_city_preference(user_id):
+    try:
+        if os.environ.get('S3_ENABLED', 'false').lower() == 'true':
+            s3 = boto3.resource('s3')
+            bucket_name = os.environ.get('S3_BUCKET_NAME', 'kiatsu-data')
+            try:
+                obj = s3.Object(bucket_name, f'user_preferences/{user_id}.json').get()
+                data = json.loads(obj['Body'].read().decode('utf-8'))
+                return data.get('city')
+            except s3.meta.client.exceptions.NoSuchKey:
+                print(f"No preference found for user {user_id}")
+                return None
+        else:
+            print("S3 is not enabled, cannot retrieve user preference")
+            return None
+    except Exception as e:
+        print(f"Error getting user preference: {str(e)}")
+        return None
+
+# 市名リクエストの処理
+def process_city_request(city_name, reply_token, prefix=""):
+    try:
+        # 市名から都市IDを検索
+        city_id = get_city_id_by_name(city_name)
+        
+        if city_id:
+            # 都市IDから気圧情報を取得
+            weather_data = get_weather_data_by_city_id(city_id)
+            
+            # 気圧情報を整形
+            message = format_city_pressure_message(city_name, weather_data)
+            
+            # プレフィックスを追加（ユーザー設定の表示など）
+            if prefix:
+                message = prefix + message
+            
+            # LINE Botから返信
+            line_bot_api.reply_message(
+                reply_token,
+                TextSendMessage(text=message)
+            )
+        else:
+            line_bot_api.reply_message(
+                reply_token,
+                TextSendMessage(text=f"{city_name}の情報が見つかりませんでした。島根県内の市名（例：松江市、出雲市）を入力してください。")
+            )
+    except Exception as e:
+        print(f"Error processing city request: {str(e)}")
+        line_bot_api.reply_message(
+            reply_token,
+            TextSendMessage(text="エラーが発生しました。しばらく経ってからもう一度お試しください。")
+        )
+
+# 既存の定期実行処理
+def process_scheduled_event():
+    try:
+        # 既存の処理をここに移動
+        forecast_data = get_weather_forecast()
+        
+        # S3にデータを保存（設定されている場合）
+        if os.environ.get('S3_ENABLED', 'false').lower() == 'true':
+            save_forecast_to_s3(forecast_data)
+        
+        # 気圧メッセージを作成
+        message = format_pressure_message(forecast_data)
+        
+        # Groq APIによる健康アドバイスを追加（設定されている場合）
+        if os.environ.get('USE_GROQ', 'false').lower() == 'true':
+            advice = get_health_advice_from_groq(forecast_data)
+            if advice:
+                message += f"\n\n{advice}"
+        
+        # LINE通知を送信
+        send_line_notification(message)
+        
+        # 予測アラート機能
+        detect_pressure_alert(forecast_data)
+        
+        # 地域カスタマイズ機能
+        if os.environ.get('REGION_CUSTOMIZATION', 'false').lower() == 'true':
+            custom_city_ids = os.environ.get('CUSTOM_CITY_IDS', '').split(',')
+            for city_id in custom_city_ids:
+                if city_id.strip():
+                    custom_forecast = get_custom_region_forecast(city_id.strip())
+                    if custom_forecast:
+                        custom_message = format_custom_region_message(custom_forecast)
+                        send_line_notification(custom_message)
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps('Weather notification sent successfully!')
+        }
+    except Exception as e:
+        print(f"Error in process_scheduled_event: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps(f"Error: {str(e)}")
+        }
+
+# 市名から都市IDを検索する関数
+def get_city_id_by_name(city_name):
+    # 島根県内の市→都市ID変換マップ
+    shimane_city_map = {
+        "松江市": "1857550",  # 松江市
+        "出雲市": "1861084",  # 出雲市
+        "浜田市": "1863289",  # 浜田市
+        "益田市": "1857553",  # 益田市
+        "大田市": "1853140",  # 大田市
+        "安来市": "1849796",  # 安来市
+        "江津市": "1860563",  # 江津市
+        "雲南市": "1848689"   # 雲南市
+    }
+    
+    # 市名から都市IDを検索
+    for key, value in shimane_city_map.items():
+        if key in city_name:
+            return value
+    
+    return None
+
+# 都市IDから気圧情報を取得する関数
+def get_weather_data_by_city_id(city_id):
+    api_key = os.environ['OPENWEATHER_API_KEY']
+    url = f"https://api.openweathermap.org/data/2.5/forecast?id={city_id}&appid={api_key}&units=metric"
+    
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        raise Exception(f"OpenWeatherMap API error: {response.status_code}")
+
+# 気圧情報を整形するメッセージ
+def format_city_pressure_message(city_name, weather_data):
+    city = weather_data['city']['name']
+    current_data = weather_data['list'][0]
+    current_pressure = current_data['main']['pressure']
+    current_time = datetime.fromtimestamp(current_data['dt'])
+    
+    # 24時間後のデータを取得（3時間ごとのデータなので8番目のデータ）
+    future_data = weather_data['list'][min(8, len(weather_data['list'])-1)]
+    future_pressure = future_data['main']['pressure']
+    future_time = datetime.fromtimestamp(future_data['dt'])
+    
+    pressure_change = future_pressure - current_pressure
+    
+    # 気圧変化の矢印
+    arrow = "→"
+    if pressure_change > 1:
+        arrow = "↑"
+    elif pressure_change < -1:
+        arrow = "↓"
+    
+    message = f"{city_name}の気圧情報:\n"
+    message += f"現在の気圧: {current_pressure}hPa ({current_time.strftime('%m/%d %H:%M')})\n"
+    message += f"24時間後の予測: {future_pressure}hPa ({future_time.strftime('%m/%d %H:%M')})\n"
+    message += f"気圧変化: {arrow} {pressure_change}hPa\n"
+    
+    # 低気圧や急激な変化がある場合の警告
+    pressure_threshold = int(os.environ.get('PRESSURE_THRESHOLD', 1010))
+    pressure_change_threshold = int(os.environ.get('PRESSURE_CHANGE_THRESHOLD', 6))
+    
+    if current_pressure < pressure_threshold:
+        message += "\n⚠️ 現在低気圧です。体調の変化に注意してください。"
+    
+    if abs(pressure_change) >= pressure_change_threshold:
+        message += f"\n⚠️ 24時間以内に{abs(pressure_change)}hPaの気圧変化が予測されています。体調の変化に注意してください。"
+    
+    return message

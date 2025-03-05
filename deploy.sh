@@ -18,11 +18,7 @@ cp -r templates ./$DEPLOYMENT_DIR/
 # 必要なパッケージをインストール
 echo "必要なパッケージをインストールしています..."
 cd $DEPLOYMENT_DIR
-pip install -t . requests
-pip install -t . python-dotenv
-pip install -t . line-bot-sdk
-pip install -t . boto3
-pip install -t . pytz
+pip install --target . requests python-dotenv line-bot-sdk boto3 pytz
 
 # 不要なファイルを削除
 echo "不要なファイルを削除しています..."
@@ -36,9 +32,10 @@ cd ..
 rm -f $ZIP_FILE
 cd $DEPLOYMENT_DIR
 zip -r ../$ZIP_FILE .
+cd ..
+zip -g $ZIP_FILE lambda_function.py
 
 # 作成したZIPファイルのサイズを表示
-cd ..
 echo "デプロイパッケージのサイズ:"
 du -h $ZIP_FILE
 

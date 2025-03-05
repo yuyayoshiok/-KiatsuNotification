@@ -34,10 +34,13 @@
    - `CITY_ID`: 天気を取得する都市ID（デフォルト: 1857550 島根県松江市）
    - `PRESSURE_THRESHOLD`: 低気圧の閾値（デフォルト: 1010）
    - `PRESSURE_CHANGE_THRESHOLD`: 気圧変化の閾値（デフォルト: 6）
+   - `PRESSURE_ALERT_THRESHOLD`: 予測アラートの閾値（デフォルト: 8）
    - `GROQ_API_KEY`: Groq APIキー
    - `USE_GROQ`: Groq APIを使用するかどうか（'true'または'false'）
    - `S3_BUCKET_NAME`: 天気データを保存するS3バケット名（デフォルト: 'kiatsu-data'）
    - `S3_ENABLED`: S3へのデータ保存を有効にするかどうか（'true'または'false'）
+   - `REGION_CUSTOMIZATION`: 地域カスタマイズを有効にするかどうか（'true'または'false'）
+   - `CUSTOM_CITY_IDS`: 追加で気圧情報を取得する都市IDのカンマ区切りリスト（例: '1850147,1856057'）
 3. 「保存」をクリックします。
 
 ### 1.4 タイムアウト設定の変更
@@ -236,3 +239,90 @@ Groq APIで使用されるモデルは`llama-3.3-70b-versatile`です。この�
 2. S3バケットは必要最小限のアクセス権限のみを付与
 3. LINE Botのアクセストークンは定期的に更新
 4. CloudWatchログに機密情報が出力されていないか確認
+
+## 10. GitHub ActionsによるCI/CD設定
+
+### 10.1 GitHubリポジトリの設定
+
+1. GitHubでリポジトリを作成し、コードをプッシュします。
+2. リポジトリの「Settings」→「Secrets and variables」→「Actions」を選択します。
+3. 以下のシークレットを追加します：
+   - `AWS_ACCESS_KEY_ID`: AWS IAMユーザーのアクセスキーID
+   - `AWS_SECRET_ACCESS_KEY`: AWS IAMユーザーのシークレットアクセスキー
+   - `AWS_REGION`: AWSリージョン（例: 'ap-northeast-1'）
+   - `OPENWEATHER_API_KEY`: OpenWeatherMap APIキー
+   - `LINE_CHANNEL_ACCESS_TOKEN`: LINE Messaging APIのチャネルアクセストークン
+   - `LINE_USER_ID`: 通知を送信するLINEユーザーID
+   - `CITY_ID`: 天気を取得する都市ID
+   - `PRESSURE_THRESHOLD`: 低気圧の閾値
+   - `PRESSURE_CHANGE_THRESHOLD`: 気圧変化の閾値
+   - `PRESSURE_ALERT_THRESHOLD`: 予測アラートの閾値
+   - `GROQ_API_KEY`: Groq APIキー
+   - `USE_GROQ`: Groq APIを使用するかどうか
+   - `S3_BUCKET_NAME`: 天気データを保存するS3バケット名
+   - `S3_ENABLED`: S3へのデータ保存を有効にするかどうか
+   - `REGION_CUSTOMIZATION`: 地域カスタマイズを有効にするかどうか
+   - `CUSTOM_CITY_IDS`: 追加で気圧情報を取得する都市IDのカンマ区切りリスト
+
+### 10.2 IAMユーザーの作成
+
+1. AWSマネジメントコンソールでIAMサービスに移動します。
+2. 「ユーザー」→「ユーザーを作成」をクリックします。
+3. ユーザー名を入力（例: 'github-actions-kiatsu'）し、「次へ」をクリックします。
+4. 「ポリシーを直接アタッチする」を選択し、以下のポリシーを追加します：
+   - `AWSLambdaFullAccess`（または最小権限のカスタムポリシー）
+5. 「次へ」→「ユーザーの作成」をクリックします。
+6. 作成したユーザーの「セキュリティ認証情報」タブから「アクセスキーを作成」をクリックします。
+7. 「コマンドラインインターフェイス（CLI）」を選択し、「次へ」をクリックします。
+8. 「アクセスキーを作成」をクリックし、表示されるアクセスキーIDとシークレットアクセスキーをメモします。
+9. これらの値をGitHubリポジトリのシークレットとして設定します。
+
+### 10.3 ワークフローファイルの作成
+
+1. リポジトリに`.github/workflows/deploy-lambda.yml`ファイルを作成します（このファイルは既に作成済みです）。
+2. ワークフローファイルには以下の処理が含まれています：
+   - コードのチェックアウト
+   - Pythonのセットアップ
+   - AWS認証情報の設定
+   - デプロイパッケージの作成
+   - Lambda関数のコード更新
+   - Lambda関数の環境変数更新
+
+### 10.4 動作確認
+
+1. コードをGitHubリポジトリのメインブランチにプッシュします。
+2. GitHubの「Actions」タブでワークフローの実行状況を確認します。
+3. ワークフローが成功したら、AWS Lambdaコンソールで関数が更新されていることを確認します。
+4. Lambda関数をテスト実行して、正常に動作することを確認します。
+
+## 11. 新機能の使用方法
+
+### 11.1 予測アラート機能
+
+予測アラート機能は、今後24時間以内に急激な気圧変化が予測される場合に自動的に通知を送信します。
+
+- 設定方法：
+  - 環境変数`PRESSURE_ALERT_THRESHOLD`で閾値を設定（デフォルト: 8hPa）
+  - この値は3時間あたりの気圧変化の閾値を表します
+
+- 通知内容：
+  - アラートメッセージには、予測される気圧変化の大きさと時間が含まれます
+  - 例：「⚠️ 気圧変化アラート ⚠️ 03/06 15:00頃に8.5hPaの急激な気圧変化が予測されています。体調の変化に注意してください。」
+
+### 11.2 地域カスタマイズ機能
+
+地域カスタマイズ機能を使用すると、複数の地域の気圧情報を取得して通知を受け取ることができます。
+
+- 設定方法：
+  - 環境変数`REGION_CUSTOMIZATION`を`true`に設定
+  - 環境変数`CUSTOM_CITY_IDS`にカンマ区切りで都市IDを設定
+    （例：`1850147,1856057`は東京と大阪の都市ID）
+
+- 都市IDの調べ方：
+  1. [OpenWeatherMap City ID List](http://bulk.openweathermap.org/sample/city.list.json.gz)をダウンロード
+  2. ファイルを解凍し、都市名で検索
+  3. または[OpenWeatherMap API](https://openweathermap.org/find)で都市名を検索
+
+- 通知内容：
+  - 各地域ごとに別々の通知が送信されます
+  - 通知には都市名、現在の気圧、24時間後の予測気圧、気圧変化が含まれます
