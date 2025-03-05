@@ -36,13 +36,13 @@ OPENWEATHER_API_KEY = os.environ.get('OPENWEATHER_API_KEY')
 CITY_ID = os.environ.get('CITY_ID', '1857550')  # 松江市のID
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_USER_ID = os.environ.get('LINE_USER_ID')
-PRESSURE_THRESHOLD = float(os.environ.get('PRESSURE_THRESHOLD', '1010'))  # 低気圧の閾値
-PRESSURE_CHANGE_THRESHOLD = float(os.environ.get('PRESSURE_CHANGE_THRESHOLD', '6'))  # 気圧変化の閾値
+PRESSURE_THRESHOLD = float(os.environ.get('PRESSURE_THRESHOLD', '1010') or '1010')  # 低気圧の閾値
+PRESSURE_CHANGE_THRESHOLD = float(os.environ.get('PRESSURE_CHANGE_THRESHOLD', '6') or '6')  # 気圧変化の閾値
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY')
 USE_GROQ = os.environ.get('USE_GROQ', 'true')
 S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME', 'kiatsu-data')
 S3_ENABLED = os.environ.get('S3_ENABLED', 'false').lower() == 'true'
-PRESSURE_ALERT_THRESHOLD = float(os.environ.get('PRESSURE_ALERT_THRESHOLD', '8'))  # 予測アラートの閾値
+PRESSURE_ALERT_THRESHOLD = float(os.environ.get('PRESSURE_ALERT_THRESHOLD', '8') or '8')  # 予測アラートの閾値
 REGION_CUSTOMIZATION = os.environ.get('REGION_CUSTOMIZATION', 'false').lower() == 'true'
 CUSTOM_CITY_IDS = os.environ.get('CUSTOM_CITY_IDS', '').split(',')  # カンマ区切りの都市ID
 
@@ -876,14 +876,16 @@ def get_custom_region_forecast(city_id):
         if future_pressure:
             # 気圧変化を計算
             pressure_change = future_pressure - current_pressure
-            change_symbol = "→"
-            if pressure_change > 0:
-                change_symbol = "↑"
-            elif pressure_change < 0:
-                change_symbol = "↓"
+            
+            # 気圧変化の矢印
+            arrow = "→"
+            if pressure_change > 1:
+                arrow = "↑"
+            elif pressure_change < -1:
+                arrow = "↓"
             
             message += f"24時間後の予測: {future_pressure}hPa（{future_weather}、{future_temp:.1f}℃）\n"
-            message += f"変化: {change_symbol} {abs(pressure_change):.1f}hPa\n"
+            message += f"変化: {arrow} {pressure_change}hPa\n"
             
             # 急激な気圧変化の警告
             if abs(pressure_change) >= PRESSURE_CHANGE_THRESHOLD:
@@ -1202,7 +1204,7 @@ def format_city_pressure_message(city_name, weather_data):
     message = f"{city_name}の気圧情報:\n"
     message += f"現在の気圧: {current_pressure}hPa ({current_time.strftime('%m/%d %H:%M')})\n"
     message += f"24時間後の予測: {future_pressure}hPa ({future_time.strftime('%m/%d %H:%M')})\n"
-    message += f"気圧変化: {arrow} {pressure_change}hPa\n"
+    message += f"変化: {arrow} {pressure_change}hPa\n"
     
     # 低気圧や急激な変化がある場合の警告
     pressure_threshold = int(os.environ.get('PRESSURE_THRESHOLD', 1010))
