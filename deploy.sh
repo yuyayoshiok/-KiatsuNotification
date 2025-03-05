@@ -18,7 +18,7 @@ cp -r templates ./$DEPLOYMENT_DIR/
 # 必要なパッケージをインストール
 echo "必要なパッケージをインストールしています..."
 cd $DEPLOYMENT_DIR
-pip install --target . requests python-dotenv line-bot-sdk boto3 pytz
+pip install --target . requests==2.31.0 python-dotenv==1.0.0 line-bot-sdk==3.5.0 boto3==1.28.57 pytz==2023.3
 
 # 不要なファイルを削除
 echo "不要なファイルを削除しています..."
